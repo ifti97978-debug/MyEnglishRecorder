@@ -338,92 +338,104 @@ class AudioStorageHelper(private val context: Context) {
     private var textFile: File? = null
     private val textBuffer = StringBuilder()
 
-    fun startNewSession() = synchronized(lock) {
-        val rawAudio = File(context.cacheDir, "current_english_only.pcm")
-        if (rawAudio.exists()) rawAudio.delete()
-        pcmFile = rawAudio
-        pcmOut = BufferedOutputStream(FileOutputStream(rawAudio))
-        totalAudioBytes = 0
-
-        val rawText = File(context.cacheDir, "current_english_only.txt")
-        if (rawText.exists()) rawText.delete()
-        textFile = rawText
-        textBuffer.clear()
-    }
-
-    fun appendEnglishSamples(samples: FloatArray) = synchronized(lock) {
-        val out = pcmOut ?: return
-        val byteBuf = ByteBuffer.allocate(samples.size * 2).order(ByteOrder.LITTLE_ENDIAN)
-        for (s in samples) {
-            val clamped = s.coerceIn(-1.0f, 1.0f)
-            byteBuf.putShort((clamped * 32767).toInt().toShort())
-        }
-        val bytes = byteBuf.array()
-        out.write(bytes)
-        out.flush()
-        totalAudioBytes += bytes.size
-    }
-
-    fun appendEnglishText(sentence: String) = synchronized(lock) {
-        if (sentence.isBlank()) return
-        if (textBuffer.isNotEmpty()) textBuffer.append(" ")
-        textBuffer.append(sentence.trim())
-        textFile?.writeText(textBuffer.toString(), Charsets.UTF_8)
-    }
-
-    fun exportBothToDownloads(clearAfterSave: Boolean): SavedFilesResult = synchronized(lock) {
-        pcmOut?.flush()
-        val rawAudio = pcmFile
-        val currentBytes = totalAudioBytes
-        val currentText = textBuffer.toString().trim()
-
-        if ((rawAudio == null || !rawAudio.exists() || currentBytes == 0L) && currentText.isEmpty()) {
-            return SavedFilesResult(null, null)
-        }
-
-        val timeStamp = SimpleDateFormat("yyyyMMdd_HHmmss", Locale.getDefault()).format(Date())
-        val audioName = "MyEnglish_$timeStamp.wav"
-        val textName = "MyEnglish_$timeStamp.txt"
-
-        var savedAudioName: String? = null
-        var savedTextName: String? = null
-
-        if (rawAudio != null && rawAudio.exists() && currentBytes > 0L) {
-            val header = createWavHeader(currentBytes, 16000, 1, 16)
-            val ok = writeBytesToDownloads(audioName, "audio/wav") { out ->
-                out.write(header)
-                FileInputStream(rawAudio).use { input ->
-                    val buf = ByteArray(8192)
-                    var remaining = currentBytes
-                    while (remaining > 0) {
-                        val toRead = minOf(buf.size.toLong(), remaining).toInt()
-                        val read = input.read(buf, 0, toRead)
-                        if (read <= 0) break
-                        out.write(buf, 0, read)
-                        remaining -= read
-                    }
-                }
-            }
-            if (ok) savedAudioName = audioName
-        }
-
-        if (currentText.isNotEmpty()) {
-            val ok = writeBytesToDownloads(textName, "text/plain") { out ->
-                out.write(currentText.toByteArray(Charsets.UTF_8))
-            }
-            if (ok) savedTextName = textName
-        }
-
-        if (clearAfterSave) {
-            pcmOut?.close()
-            pcmOut = null
-            rawAudio?.delete()
-            textFile?.delete()
+    fun startNewSession() {
+        synchronized(lock) {
+            val rawAudio = File(context.cacheDir, "current_english_only.pcm")
+            if (rawAudio.exists()) rawAudio.delete()
+            pcmFile = rawAudio
+            pcmOut = BufferedOutputStream(FileOutputStream(rawAudio))
             totalAudioBytes = 0
+
+            val rawText = File(context.cacheDir, "current_english_only.txt")
+            if (rawText.exists()) rawText.delete()
+            textFile = rawText
             textBuffer.clear()
         }
+    }
 
-        return SavedFilesResult(savedAudioName, savedTextName)
+    fun appendEnglishSamples(samples: FloatArray) {
+        synchronized(lock) {
+            val out = pcmOut ?: return
+            val byteBuf = ByteBuffer.allocate(samples.size * 2)
+                .order(ByteOrder.LITTLE_ENDIAN)
+            for (s in samples) {
+                val clamped = s.coerceIn(-1.0f, 1.0f)
+                byteBuf.putShort((clamped * 32767).toInt().toShort())
+            }
+            val bytes = byteBuf.array()
+            out.write(bytes)
+            out.flush()
+            totalAudioBytes += bytes.size
+        }
+    }
+
+    fun appendEnglishText(sentence: String) {
+        synchronized(lock) {
+            if (sentence.isBlank()) return
+            if (textBuffer.isNotEmpty()) textBuffer.append(" ")
+            textBuffer.append(sentence.trim())
+            textFile?.writeText(textBuffer.toString(), Charsets.UTF_8)
+        }
+    }
+
+    fun exportBothToDownloads(clearAfterSave: Boolean): SavedFilesResult {
+        synchronized(lock) {
+            pcmOut?.flush()
+            val rawAudio = pcmFile
+            val currentBytes = totalAudioBytes
+            val currentText = textBuffer.toString().trim()
+
+            if ((rawAudio == null || !rawAudio.exists() || currentBytes == 0L) &&
+                currentText.isEmpty()
+            ) {
+                return SavedFilesResult(null, null)
+            }
+
+            val fmt = SimpleDateFormat("yyyyMMdd_HHmmss", Locale.getDefault())
+            val timeStamp = fmt.format(Date())
+            val audioName = "MyEnglish_$timeStamp.wav"
+            val textName = "MyEnglish_$timeStamp.txt"
+
+            var savedAudioName: String? = null
+            var savedTextName: String? = null
+
+            if (rawAudio != null && rawAudio.exists() && currentBytes > 0L) {
+                val header = createWavHeader(currentBytes, 16000, 1, 16)
+                val ok = writeBytesToDownloads(audioName, "audio/wav") { out ->
+                    out.write(header)
+                    FileInputStream(rawAudio).use { input ->
+                        val buf = ByteArray(8192)
+                        var remaining = currentBytes
+                        while (remaining > 0) {
+                            val toRead = minOf(buf.size.toLong(), remaining).toInt()
+                            val read = input.read(buf, 0, toRead)
+                            if (read <= 0) break
+                            out.write(buf, 0, read)
+                            remaining -= read
+                        }
+                    }
+                }
+                if (ok) savedAudioName = audioName
+            }
+
+            if (currentText.isNotEmpty()) {
+                val ok = writeBytesToDownloads(textName, "text/plain") { out ->
+                    out.write(currentText.toByteArray(Charsets.UTF_8))
+                }
+                if (ok) savedTextName = textName
+            }
+
+            if (clearAfterSave) {
+                pcmOut?.close()
+                pcmOut = null
+                rawAudio?.delete()
+                textFile?.delete()
+                totalAudioBytes = 0
+                textBuffer.clear()
+            }
+
+            return SavedFilesResult(savedAudioName, savedTextName)
+        }
     }
 
     private fun writeBytesToDownloads(
@@ -443,8 +455,10 @@ class AudioStorageHelper(private val context: Context) {
                     )
                     put(MediaStore.Downloads.IS_PENDING, 1)
                 }
-                val uri = resolver.insert(MediaStore.Downloads.EXTERNAL_CONTENT_URI, values)
-                    ?: return false
+                val uri = resolver.insert(
+                    MediaStore.Downloads.EXTERNAL_CONTENT_URI,
+                    values
+                ) ?: return false
                 resolver.openOutputStream(uri)?.use { out -> writer(out) } ?: return false
 
                 values.clear()
@@ -454,13 +468,20 @@ class AudioStorageHelper(private val context: Context) {
             } else {
                 @Suppress("DEPRECATION")
                 val dir = File(
-                    Environment.getExternalStoragePublicDirectory(Environment.DIRECTORY_DOWNLOADS),
+                    Environment.getExternalStoragePublicDirectory(
+                        Environment.DIRECTORY_DOWNLOADS
+                    ),
                     "MyEnglishRecordings"
                 )
                 if (!dir.exists()) dir.mkdirs()
                 val outFile = File(dir, fileName)
                 FileOutputStream(outFile).use { out -> writer(out) }
-                MediaScannerConnection.scanFile(context, arrayOf(outFile.absolutePath), null, null)
+                MediaScannerConnection.scanFile(
+                    context,
+                    arrayOf(outFile.absolutePath),
+                    null,
+                    null
+                )
                 true
             }
         } catch (e: Exception) {
@@ -469,7 +490,12 @@ class AudioStorageHelper(private val context: Context) {
         }
     }
 
-    private fun createWavHeader(pcmBytes: Long, sampleRate: Int, channels: Int, bitsPerSample: Int): ByteArray {
+    private fun createWavHeader(
+        pcmBytes: Long,
+        sampleRate: Int,
+        channels: Int,
+        bitsPerSample: Int
+    ): ByteArray {
         val byteRate = sampleRate * channels * bitsPerSample / 8
         val totalDataLen = pcmBytes + 36
         return ByteBuffer.allocate(44).order(ByteOrder.LITTLE_ENDIAN).apply {
@@ -549,7 +575,7 @@ class VoiceRecorderService : Service() {
             }
             "EXPORT_NOW" -> {
                 scope.launch {
-                    val res = storageHelper.exportBothToDownloads(clearAfterSave = false)
+                    val res = storageHelper.exportBothToDownloads(false)
                     liveStatus.value = formatSavedStatus(res)
                 }
                 return START_STICKY
@@ -570,8 +596,323 @@ class VoiceRecorderService : Service() {
                 "English Voice Recorder",
                 NotificationManager.IMPORTANCE_LOW
             )
-            getSystemService(NotificationManager::class.java).createNotificationChannel(channel)
+            val nm = getSystemService(NotificationManager::class.java)
+            nm.createNotificationChannel(channel)
         }
 
         val notification = NotificationCompat.Builder(this, channelId)
-  
+            .setContentTitle("My English Recorder")
+            .setContentText("Active in background (lock supported)")
+            .setSmallIcon(android.R.drawable.ic_btn_speak_now)
+            .setOngoing(true)
+            .build()
+
+        if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.Q) {
+            startForeground(
+                101,
+                notification,
+                ServiceInfo.FOREGROUND_SERVICE_TYPE_MICROPHONE
+            )
+        } else {
+            startForeground(101, notification)
+        }
+    }
+
+    private fun acquireWakeLock() {
+        val pm = getSystemService(POWER_SERVICE) as PowerManager
+        wakeLock = pm.newWakeLock(
+            PowerManager.PARTIAL_WAKE_LOCK,
+            "MyRecorder::MicWakeLock"
+        ).apply {
+            acquire(6 * 60 * 60 * 1000L)
+        }
+    }
+
+    @SuppressLint("MissingPermission")
+    private fun startRecordingLoop() {
+        if (isRunning.value) return
+        isRunning.value = true
+        liveText.value = ""
+        liveStatus.value = "Listening (Screen lock supported)..."
+        storageHelper.startNewSession()
+
+        val aiEngine = getOrInitEngine(applicationContext)
+
+        scope.launch {
+            val sampleRate = 16000
+            val bufferSize = AudioRecord.getMinBufferSize(
+                sampleRate,
+                AudioFormat.CHANNEL_IN_MONO,
+                AudioFormat.ENCODING_PCM_16BIT
+            ).coerceAtLeast(4096)
+
+            audioRecord = AudioRecord(
+                MediaRecorder.AudioSource.VOICE_RECOGNITION,
+                sampleRate,
+                AudioFormat.CHANNEL_IN_MONO,
+                AudioFormat.ENCODING_PCM_16BIT,
+                bufferSize
+            )
+            audioRecord?.startRecording()
+
+            val shortBuf = ShortArray(512)
+            while (isRunning.value) {
+                val read = audioRecord?.read(shortBuf, 0, shortBuf.size) ?: break
+                if (read > 0) {
+                    val floatSamples = FloatArray(read) { shortBuf[it] / 32768.0f }
+                    aiEngine.vad.acceptWaveform(floatSamples)
+
+                    while (!aiEngine.vad.empty()) {
+                        val segment = aiEngine.vad.front()
+                        aiEngine.vad.pop()
+
+                        when (val res = aiEngine.processSpeechSegment(segment.samples)) {
+                            is FilterResult.Accepted -> {
+                                storageHelper.appendEnglishSamples(segment.samples)
+                                storageHelper.appendEnglishText(res.text)
+                                liveText.value = "${liveText.value} ${res.text}".trim()
+                                liveStatus.value = "Voice + Text Added Live"
+                            }
+                            is FilterResult.Rejected -> {
+                                liveStatus.value = "Ignored: ${res.reason}"
+                            }
+                        }
+                    }
+                }
+            }
+        }
+    }
+
+    private fun stopRecordingAndSave() {
+        if (!isRunning.value && audioRecord == null) return
+        isRunning.value = false
+        try {
+            audioRecord?.stop()
+            audioRecord?.release()
+        } catch (_: Exception) {}
+        audioRecord = null
+
+        val res = storageHelper.exportBothToDownloads(true)
+        liveStatus.value = formatSavedStatus(res)
+
+        if (wakeLock?.isHeld == true) wakeLock?.release()
+    }
+
+    private fun formatSavedStatus(res: SavedFilesResult): String {
+        return if (res.audioFileName != null || res.textFileName != null) {
+            val a = res.audioFileName ?: "-"
+            val t = res.textFileName ?: "-"
+            "Saved in Downloads/MyEnglishRecordings:\n- Voice: $a\n- Text: $t"
+        } else {
+            "Stopped (No English voice from you was detected)"
+        }
+    }
+
+    override fun onDestroy() {
+        stopRecordingAndSave()
+        scope.cancel()
+        super.onDestroy()
+    }
+
+    override fun onBind(intent: Intent?): IBinder? = null
+}
+EOF
+
+cat << 'EOF' > app/src/main/java/com/example/myenglishrecorder/MainActivity.kt
+package com.example.myenglishrecorder
+
+import android.Manifest
+import android.annotation.SuppressLint
+import android.content.Intent
+import android.content.pm.PackageManager
+import android.media.*
+import android.net.Uri
+import android.os.*
+import android.provider.Settings
+import android.widget.*
+import androidx.activity.result.contract.ActivityResultContracts
+import androidx.appcompat.app.AppCompatActivity
+import androidx.core.content.ContextCompat
+import androidx.lifecycle.lifecycleScope
+import kotlinx.coroutines.*
+
+class MainActivity : AppCompatActivity() {
+
+    private lateinit var statusTv: TextView
+    private lateinit var outputTv: TextView
+    private lateinit var enrollBtn: Button
+    private lateinit var startStopBtn: Button
+    private lateinit var downloadNowBtn: Button
+
+    private val permLauncher = registerForActivityResult(
+        ActivityResultContracts.RequestMultiplePermissions()
+    ) { }
+
+    override fun onCreate(savedInstanceState: Bundle?) {
+        super.onCreate(savedInstanceState)
+
+        val layout = LinearLayout(this).apply {
+            orientation = LinearLayout.VERTICAL
+            setPadding(40, 60, 40, 40)
+        }
+        statusTv = TextView(this).apply {
+            text = "Loading Offline AI Models..."
+            setPadding(0, 0, 0, 20)
+        }
+        enrollBtn = Button(this).apply {
+            text = "1. Register My Voice (10s)"
+            isEnabled = false
+        }
+        startStopBtn = Button(this).apply {
+            text = "2. Start Background Recording"
+            isEnabled = false
+        }
+        downloadNowBtn = Button(this).apply {
+            text = "Download Voice (.wav) + Text (.txt) Now"
+            isEnabled = false
+        }
+        outputTv = TextView(this).apply {
+            textSize = 18f
+            setPadding(0, 30, 0, 0)
+            hint = "Your English speech will convert to text immediately here..."
+        }
+
+        layout.addView(statusTv)
+        layout.addView(enrollBtn)
+        layout.addView(startStopBtn)
+        layout.addView(downloadNowBtn)
+        layout.addView(
+            ScrollView(this).apply {
+                layoutParams = LinearLayout.LayoutParams(
+                    LinearLayout.LayoutParams.MATCH_PARENT, 0, 1f
+                )
+                addView(outputTv)
+            }
+        )
+        setContentView(layout)
+
+        requestNeededPermissions()
+        askIgnoreBatteryOptimization()
+
+        lifecycleScope.launch(Dispatchers.IO) {
+            val engine = VoiceRecorderService.getOrInitEngine(applicationContext)
+            withContext(Dispatchers.Main) {
+                enrollBtn.isEnabled = !VoiceRecorderService.isRunning.value
+                startStopBtn.isEnabled = engine.isEnrolled
+                statusTv.text = if (engine.isEnrolled) {
+                    "Voice registered! Ready to record & save separate Voice + Text files."
+                } else {
+                    "First tap 'Register My Voice' and speak for 10 seconds."
+                }
+            }
+        }
+
+        enrollBtn.setOnClickListener { recordAndEnroll10Seconds() }
+        startStopBtn.setOnClickListener { toggleService() }
+        downloadNowBtn.setOnClickListener { downloadFilesNow() }
+
+        lifecycleScope.launch {
+            VoiceRecorderService.liveText.collect { outputTv.text = it }
+        }
+        lifecycleScope.launch {
+            VoiceRecorderService.liveStatus.collect { statusTv.text = it }
+        }
+        lifecycleScope.launch {
+            VoiceRecorderService.isRunning.collect { running ->
+                startStopBtn.text = if (running) {
+                    "Stop & Download Both Files"
+                } else {
+                    "2. Start Background Recording"
+                }
+                downloadNowBtn.isEnabled = running
+                enrollBtn.isEnabled = !running
+            }
+        }
+    }
+
+    private fun requestNeededPermissions() {
+        val perms = mutableListOf(Manifest.permission.RECORD_AUDIO)
+        if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.TIRAMISU) {
+            perms.add(Manifest.permission.POST_NOTIFICATIONS)
+        }
+        if (Build.VERSION.SDK_INT <= Build.VERSION_CODES.P) {
+            perms.add(Manifest.permission.WRITE_EXTERNAL_STORAGE)
+        }
+        permLauncher.launch(perms.toTypedArray())
+    }
+
+    private fun askIgnoreBatteryOptimization() {
+        if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.M) {
+            val pm = getSystemService(POWER_SERVICE) as PowerManager
+            if (!pm.isIgnoringBatteryOptimizations(packageName)) {
+                val intent = Intent(
+                    Settings.ACTION_REQUEST_IGNORE_BATTERY_OPTIMIZATIONS
+                ).apply {
+                    data = Uri.parse("package:$packageName")
+                }
+                startActivity(intent)
+            }
+        }
+    }
+
+    @SuppressLint("MissingPermission")
+    private fun recordAndEnroll10Seconds() {
+        if (ContextCompat.checkSelfPermission(this, Manifest.permission.RECORD_AUDIO)
+            != PackageManager.PERMISSION_GRANTED) return
+
+        enrollBtn.isEnabled = false
+        statusTv.text = "Speak clearly for 10 seconds to save your voiceprint..."
+
+        lifecycleScope.launch(Dispatchers.IO) {
+            val totalSamples = 16000 * 10
+            val buf = ShortArray(totalSamples)
+            val rec = AudioRecord(
+                MediaRecorder.AudioSource.VOICE_RECOGNITION,
+                16000,
+                AudioFormat.CHANNEL_IN_MONO,
+                AudioFormat.ENCODING_PCM_16BIT,
+                16000 * 2
+            )
+            rec.startRecording()
+            var offset = 0
+            while (offset < totalSamples) {
+                val r = rec.read(buf, offset, totalSamples - offset)
+                if (r > 0) offset += r else break
+            }
+            rec.stop()
+            rec.release()
+
+            val floats = FloatArray(totalSamples) { buf[it] / 32768.0f }
+            val ok = VoiceRecorderService.getOrInitEngine(applicationContext)
+                .enrollVoice(floats)
+
+            withContext(Dispatchers.Main) {
+                enrollBtn.isEnabled = true
+                startStopBtn.isEnabled = ok
+                statusTv.text = if (ok) {
+                    "Voice Registered! Now tap Start Recording."
+                } else {
+                    "Failed, try again."
+                }
+            }
+        }
+    }
+
+    private fun toggleService() {
+        val intent = Intent(this, VoiceRecorderService::class.java)
+        if (VoiceRecorderService.isRunning.value) {
+            intent.action = "STOP"
+            startService(intent)
+        } else {
+            ContextCompat.startForegroundService(this, intent)
+        }
+    }
+
+    private fun downloadFilesNow() {
+        val intent = Intent(this, VoiceRecorderService::class.java).apply {
+            action = "EXPORT_NOW"
+        }
+        startService(intent)
+    }
+}
+EOF
